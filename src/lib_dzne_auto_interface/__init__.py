@@ -51,6 +51,12 @@ class Information(object):
             del self._kwargs[key]
             return
         raise TypeError()
+    def __str__(self):
+        ans = {"args":self.args, "kwargs":self.kwargs}
+        ans = str(ans)
+        return ans
+    def __repr__(self):
+        return str(self)
     def pop(self, key=-1, /, *args):
         if type(key) in (int, slice):
             return self._args.pop(key, *args)
@@ -85,8 +91,17 @@ class _Knot(object):
             parents=[self._parser],
             description=self._parser.description,
         )
-    def parse(self, args):
-        return vars(self._parser.parse_args(args))
+    def parse(self, args, *, add_help=False):
+        return vars(self.parser(add_help=add_help).parse_args(args))
+    @staticmethod
+    def _details_from_annotation(annotation):
+        if annotation is _ins.Parameter.empty:
+            return {}
+        if callable(annotation):
+            return {'type': annotation}
+        if type(annotation) is str:
+            return {'help': annotation}  
+        return dict(annotation)      
     @property
     def subknots(self):
         return list(self._subknots)
@@ -111,15 +126,11 @@ class _Argument(_Knot):
         self._action = info.exec(self._parser.add_argument)
         self._subknots = list()
     @property
-    def ispositional(self):
-        return self.option_strings is None
+    def positional(self):
+        return not bool(len(self.option_strings))
     @property
     def option_strings(self):
-        ans = self._action.option_strings
-        if ans is None:
-            return None
-        else:
-            return tuple(ans)
+        return tuple(self._action.option_strings)
     @property
     def action(self):
         return self._action_string
@@ -127,25 +138,46 @@ class _Argument(_Knot):
     def dest(self):
         return self._action.dest
     @property
+    def nargs(self):
+        return self._action.nargs
+    @property
     def help(self):
         return self._action.help
-    @staticmethod
-    def of_return(annotation, *, details={}):
+    @classmethod
+    def of_return(cls, annotation, *, details={}):
         if annotation is _ins.Parameter.empty:
             return None
-        if callable(annotation):
-            annotation = {'type': annotation}
-        elif type(annotation) is str:
-            annotation = {'help': annotation}
-        return _Argument(**annotation, **details)
+        ann = cls._details_from_annotation(annotation)
+        return _Argument(**ann, **details)
 
 class _Parameter(_Knot):
     def __init__(self, value):
         self._subknots = self._get_subknots(value)
         parents = [x.parser(add_help=False) for x in self._subknots]
         self._parser = self._make_parser(parents=parents)
-    @staticmethod
-    def _get_subknots(parameter):
+        self._kind = value.kind
+        #self.information({x:None for x in self.dests})
+    def information(self, kwargs, /):
+        if set(kwargs.keys()) != set(self.dests):
+            raise KeyError()
+        if self.kind is _ins.Parameter.VAR_KEYWORD:
+            return Information(kwargs=kwargs)
+        dest, = self.dests
+        if self.kind is _ins.Parameter.KEYWORD_ONLY:
+            return Information(kwargs=kwargs)
+        if self.kind is _ins.Parameter.VAR_POSITIONAL:
+            return Information(args=kwargs[dest])
+        if self.kind is _ins.Parameter.POSITIONAL_ONLY:
+            return Information(args=[kwargs[dest]])
+        raise ValueError()
+    @property
+    def dests(self):
+        return [a.dest for a in self.subknots]
+    @property
+    def kind(self):
+        return self._kind
+    @classmethod
+    def _get_subknots(cls, parameter):
         if parameter.name.startswith('_'):
             raise ValueError(parameter.name)
         ann = parameter.annotation
@@ -157,10 +189,7 @@ class _Parameter(_Knot):
             if type(ann) is dict:
                 return [_Argument(**v, dest=k) for k, v in ann.items()]
             raise ValueError()
-        if ann is _ins.Parameter.empty:
-            ann = dict()
-        else:
-            ann = dict(ann)
+        ann = cls._details_from_annotation(ann)
         ans = dict()
         ans['dest'] = parameter.name
         if parameter.kind is _ins.Parameter.POSITIONAL_ONLY:
@@ -169,6 +198,7 @@ class _Parameter(_Knot):
                 ans['default'] = parameter.default
         elif parameter.kind is _ins.Parameter.VAR_POSITIONAL:
             ans['nargs'] = '*'
+            ans['default'] = tuple()
         elif parameter.kind is _ins.Parameter.KEYWORD_ONLY:
             if 'option_strings' not in ann.keys():
                 ann['option_strings'] = ['-' + parameter.name.replace('_', '-')]
@@ -178,14 +208,14 @@ class _Parameter(_Knot):
                 ans['required'] = False
                 ans['default'] = parameter.default
         else:
-            raise ValueError()
+            raise ValueError(f"The parameter {parameter} is not of a kind that can be included into auto-interface. ")
         ans = _Argument(**ans, **ann)
         return [ans]
 
 
 class _Main(_Knot):
     def run_cli(self, args):
-        kwargs = self.parser(add_help=True).parse_args(args)
+        kwargs = self.parse(args, add_help=True)
         self._run(kwargs)
     def run_gui(self):
         #implement!
@@ -216,18 +246,19 @@ class _Callable(_Main):
         raise NotImplementedError()
         #implement!
     def _run(self, kwargs):
-        outfile = kwargs.pop(self.argument_of_return.dest)
+        if self.argument_of_return is None:
+            outfile = None
+        else:
+            outfile = kwargs.pop(self.argument_of_return.dest)
         info = Information()
         for p in self.parameters:
-            for a in p.subknots:
-                value = kwargs.pop(a.dest)
-                if a.ispositional:
-                    info.append(value)
-                else:
-                    info[a.dest] = value
+            y = {x:kwargs.pop(x) for x in p.dests}
+            info += p.information(y)
         if len(kwargs):
             raise KeyError()
         result = info.exec(self._value)
+        if outfile is None:
+            return
         result = outfile.fileDataType(result)
         outfile.save(result)
     def _go(self):
@@ -249,28 +280,37 @@ class _Callable(_Main):
 class _Uncallable(_Main):
     def __init__(self, value, return_details):
         self._dest = value._dest
-        self._subknots = dict()
+        self._mains = dict()
         parser = self._make_parser()
         subparsers = parser.add_subparsers(dest=value._dest)
         for n, m in _ins.getmembers(value):
             if n.startswith("_"):
                 continue
-            self._subknots[n] = make(m, return_details=return_details)
-            subparsers.add_parser(
+            name = n.replace('_', '-')
+            self._mains[name] = make(m, return_details=return_details)
+            parent = self._mains[name].parser(add_help=False)
+            subparser = subparsers.add_parser(
                 n.replace("_", "-"),
-                parents=[self._subknots[n].parser(add_help=False)],
+                parents=[parent],
                 add_help=True,
             )
+            subparser.description = parent.description
         self._parser = self._make_parser(
             parents=[parser],
             description=value.__doc__,
         )
     def _run(self, kwargs):
         value = kwargs.pop(self.dest)
-        return self.subknots[value]._run(kwargs)
+        return self._mains[value]._run(kwargs)
     @property
     def dest(self):
         return self._dest
+    @property
+    def mains(self):
+        return dict(self._mains)
+    @property
+    def _subknots(self):
+        return list(self._mains.values())
 
 
 
