@@ -16,6 +16,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 keywords = []
-dependencies = []
+dependencies = [
+    
+]
 requires-python = ">=3.11"
 

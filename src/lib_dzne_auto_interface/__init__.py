@@ -3,6 +3,9 @@ import inspect as _ins
 import tkinter as _tk
 import tkinter.messagebox as _msgbox
 import tkinter.ttk as _ttk
+import tkinter.filedialog as _fd
+#.askopenfilename as _open
+#import tkinter.filedialog.asksaveasfilename as _saveas
 
 
 class Information(object):
@@ -81,6 +84,230 @@ class Information(object):
         return func(*self._args, **self._kwargs)
 
 
+
+
+
+
+
+class HelpButton(_ttk.Button):
+    @classmethod
+    def make(cls, *args, message, **kwargs):
+        if message is None:
+            return None
+        return cls(*args, message=message, **kwargs)
+    def __init__(self, *args, title, message, **kwargs):
+        super().__init__(*args, command=self.show_help, text="help", **kwargs)
+        self.title = title
+        self.message = message
+    def show_help(self):
+        _msgbox.showinfo(
+            title=self.title,
+            message=self.message,
+        )
+class AtomArg(_tk.Frame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        self.active = True
+        self._init()
+    @property
+    def active(self):
+        return self._active
+    @active.setter
+    def active(self, value):
+        self.set_active(value)
+class FlagAtomArg(AtomArg):
+    def set_active(self, value):
+        value = bool(value)
+        state = 'normal' if value else 'disabled'
+        self.checkbutton.config(state=state)
+        self._active = value
+    @property
+    def checked(self):
+        return bool(self.intVar.get())
+    def _init(self):
+        self.intVar = _tk.IntVar()
+        self.checkbutton = _ttk.Checkbutton(
+            self,
+            variable=self.intVar,
+            onvalue=1,
+            offvalue=0,
+        )
+        self.checkbutton.pack(
+            side='left',
+            padx=0,
+            pady=0,
+        )
+class ChoicesAtomArg(AtomArg):
+    def set_active(self, value):
+        value = bool(value)
+        state = 'readonly' if value else 'disabled'
+        self.combobox.config(state=state)
+        self.combobox.pack(
+            padx=0,
+            pady=0,
+            fill='both',
+            expand=True,
+        )
+        self._active = value
+    @property
+    def args(self):
+        return [self.stringVar.get()]
+    def _init(self, *, choices):
+        choices = tuple(str(x) for x in choices)
+        self.stringVar = tk.StringVar()
+        self.combobox = _ttk.Combobox(
+            self,
+            textvariable=self.stringVar,
+            values=choices,
+        )
+        self.active = True
+class TextAtomArg(AtomArg):
+    def set_active(self, value):
+        value = bool(value)
+        state = 'normal' if value else 'disabled'
+        self.text.config(state=state)
+        self._active = value
+    @property
+    def args(self):
+        ans = self.text.get("1.0", "end-1c")
+        return [ans]
+    def _init(self):
+        self.text = _tk.Text(self)
+class FileAtomArg(AtomArg):
+    def active(self, value):
+        value = bool(value)
+        state = 'normal' if value else 'disabled'
+        self.entry.config(state=state)
+        self.button.config(state=state)
+        self._active = value
+    @property
+    def text(self):
+        return self._text
+    @text.setter
+    def text(self, value):
+        value = str(value)
+        self.entry.delete(0, 'end')
+        self.entry.insert(0, value)
+        self._text = value
+    @property
+    def filetype(self):
+        return self._filetype
+    @filetype.setter
+    def filetype(self, value):
+        if value is None:
+            value = "All Files"
+        if type(value) is str:
+            raise TypeError()
+        self._filetype = value
+    @property
+    def ext(self):
+        return self._ext
+    @ext.setter
+    def ext(self, value):
+        if value is None:
+            value = ""
+        if type(value) is str:
+            raise TypeError()
+        if value != "" and not value.startswith("."):
+            raise ValueError()
+        self._ext = value
+    @property
+    def mode(self):
+        return self._mode
+    @mode.setter
+    def mode(self, value):
+        if value not in ('r', 'w'):
+            raise ValueError()
+        self._mode = value
+    @property
+    def args(self):
+        return [self.text]
+    def _init(self, mode, filetype, ext):
+        self.text = ""
+        self.mode = mode
+        self.filetype = filetype
+        self.ext = ext
+        self.button = _ttk.Button(
+            self,
+            text="browse",
+            command=self.button_command,
+        )
+        self.button.pack(
+            side='right',
+            padx=(10, 0),
+            pady=(0, 0),
+        )
+        self.entry = _tk.Entry(self)
+        self.entry.pack(
+            side='left',
+            padx=(0, 10),
+            pady=(0, 0),
+        )
+    def button_command(self):
+        func = {
+            'r':_fd.askopenfilename,
+            'w':_fd.asksaveasfilename,
+        }[self.mode]
+        params = ((self.filetype, "*"+self.ext),)
+        file = func(
+            filetypes=params, 
+            defaultextension=params,
+        )
+        if file is None:
+            return
+        if file == "":
+            return
+        self.text = file
+
+class SingleInput(_tk.Entry):
+    def __init__(self, *args, **kwargs):
+        self.stringVar = _tk.StringVar()
+        super().__init__(*args, textvariable=self.stringVar, **kwargs)
+    def get_args(self):
+        return [self.stringVar.get()]
+    @property
+    def active(self):
+        return self._active
+    @active.setter
+    def active(self, value):
+        value = bool(value)
+        state = 'normal' if value else 'disabled'
+        self.config(state=state)
+        self._active = value
+class MultiInput(_tk.Text):
+    @property
+    def active(self):
+        return self._active
+    @active.setter
+    def active(self, value):
+        value = bool(value)
+        state = 'normal' if value else 'disabled'
+        self.config(state=state)
+        self._active = value
+    def get_args(self):
+        ans = self.get("1.0", "end-1c")
+        ans = ans.split('\n')
+        return ans
+#class NargsFrame(_tk.Frame):
+#    def __init__(self, master, **kwargs):
+#        super().__init__(master, **kwargs)
+#        self.buttonFrame = _tk.Frame(master)
+#        self.buttonFrame.pack(
+#            side='top',
+#            fill='x',
+#            padx=0,
+#            pady=0,
+#        )
+#        self.plusButton = _ttk.Button(self)
+
+
+
+
+
+
+
+
+
 class _Knot(object):
     def _make_parser(self, *args, **kwargs):
         return _ap.ArgumentParser(
@@ -111,68 +338,8 @@ class _Knot(object):
     def subknots(self):
         return list(self._subknots)
 
-
-class Checkbutton(_ttk.Checkbutton):
-    def __init__(self, *args, **kwargs):
-        self.intVar = _tk.IntVar()
-        super().__init__(*args, variable=self.intVar, onvalue=1, offvalue=0, **kwargs)
-        self.active = False
-    @property
-    def checked(self):
-        return bool(self.intVar.get())
-class HelpButton(_ttk.Button):
-    @classmethod
-    def make(cls, *args, message, **kwargs):
-        if message is None:
-            return None
-        return cls(*args, message=message, **kwargs)
-    def __init__(self, *args, title, message, **kwargs):
-        super().__init__(*args, command=self.show_help, **kwargs)
-        self.title = title
-        self.message = message
-    def show_help(self):
-        _msgbox.showinfo(
-            title=self.title,
-            message=self.message,
-        )
-class SingleInput(_tk.Entry):
-    def __init__(self, *args, **kwargs):
-        self.stringVar = _tk.StringVar()
-        super().__init__(*args, textvariable=self.stringVar, **kwargs)
-    def get_args(self):
-        return [self.stringVar.get()]
-    @property
-    def active(self):
-        return self._active
-    @active.setter
-    def active(self, value):
-        value = bool(value)
-        if value:
-            self.config(state='normal')
-        else:
-            self.config(state="disabled")
-        self._active = value
-class MultiInput(_tk.Text):
-    @property
-    def active(self):
-        return self._active
-    @active.setter
-    def active(self, value):
-        value = bool(value)
-        if value:
-            self.config(state='normal')
-        else:
-            self.config(state="disabled")
-        self._active = value
-    def get_args(self):
-        ans = self.get("1.0", "end-1c")
-        ans = ans.split('\n')
-        return ans
-
-
-
 class _Argument(_Knot):
-    class _Frame(LabelFrame):
+    class _Frame(_tk.LabelFrame):
         def __init__(self, master, knot):
             super().__init__(master, text=knot.dest)
             self.knot = knot
@@ -187,10 +354,10 @@ class _Argument(_Knot):
             else:
                 return None
         @property
-        def active:
+        def active(self):
             if self.checkbutton is None:
                 return None
-            return self.checkbutton.active
+            return self.checkbutton.checked
         def get_args(self):
             ans = list()
             if self.active is False:
@@ -205,7 +372,9 @@ class _Argument(_Knot):
             kwargs = self.knot.parse(args)
             return kwargs
         def check_change(self):
-            self.inputWidget.active = self.checkbutton.checked
+            print(self.inputWidget is not None)
+            if self.inputWidget is not None:
+                self.inputWidget.active = self.checkbutton.checked
         def _add_helpButton(self):
             if self.knot.help is None:
                 return None
@@ -216,6 +385,7 @@ class _Argument(_Knot):
             )
             ans.pack(
                 side='right',
+                #fill='y',
                 padx=10,
                 pady=10,
             )
@@ -223,7 +393,7 @@ class _Argument(_Knot):
         def _add_checkbutton(self):
             if self.knot.required:
                 return None
-            ans = Checkbutton(
+            ans = _ttk.Checkbutton(
                 self, 
                 command=self.check_change,
             )
@@ -246,7 +416,10 @@ class _Argument(_Knot):
             ans.pack(
                 padx=10,
                 pady=10,
+                side='left',
+                fill='x',
             )
+            return ans
     def __init__(self, *args, **kwargs):
         self._subknots = list()
         info = Information()
@@ -299,17 +472,20 @@ class _Argument(_Knot):
 class _Parameter(_Knot):
     class _Frame(_tk.Frame):
         def __init__(self, master, *, knot):
-            super().__init__(master)
+            super().__init__(master, bg='red')
+            #s = Style()
+            #s.configure('My.TFrame', background='red')
             self.knot = knot
             self.subframes = list()
             for item in enumerate(self.knot.subknots):
-                self.subframes.append(self._subframe(*item, len(self.knot.subknots)))
-        def _subframe(self, index, argument, length):
+                self.subframes.append(self._add_subframe(*item, len(self.knot.subknots)))
+        def _add_subframe(self, index, argument, length):
             ans = argument.frame(self)
             padN = 0 if (index == 0) else 10
             padS = 0 if (index == length - 1) else 10
             ans.pack(
                 side='top',
+                fill='x',
                 padx=(0, 0),
                 pady=(padN, padS),
             )
@@ -407,12 +583,14 @@ class _Callable(_Main):
             self.buttonFrame = _tk.Frame(self)
             self.buttonFrame.pack(
                 side='bottom',
-                fill=_tk.X,
+                fill='x',
+                padx=0,
+                pady=0,
             )
             self.helpButton = HelpButton(
                 self.buttonFrame,
                 title="help",
-                message=self.description,
+                message=self.knot.description,
             )
             self.helpButton.pack(
                 side='right',
@@ -421,6 +599,7 @@ class _Callable(_Main):
             )
             self.goButton = _ttk.Button(
                 self.buttonFrame,
+                text="go",
                 command=self.go,
             )
             self.goButton.pack(
@@ -430,10 +609,11 @@ class _Callable(_Main):
             )
             self.subframes = list()
             for subknot in self.knot.subknots:
-                subframe = subknot.frame(master=self, knot=self.knot)
+                subframe = subknot.frame(master=self)
                 subframe.pack(
                     side='top',
-                    fill=_tk.X,
+                    fill='both',
+                    expand=True,
                     padx=10,
                     pady=10,
                 )
@@ -495,21 +675,26 @@ class _Callable(_Main):
 class _Uncallable(_Main):
     class _Frame(_tk.Frame):
         def __init__(self, master, *, knot, **kwargs):
-            super().__init__(master, **kwargs)
+            super().__init__(master, bg="blue", **kwargs)
             self.knot = knot
             self._init()
         def _init(self):
             self.buttonFrame = self._add_buttomFrame()
             self.helpButton = self._add_helpButton()
             self.notebook = self._add_notebook()#ttk.Notebook(container,**options)
-            for name, subknot in self.mains.items():
-                subframe = subknot.frame(self)
+            for name, subknot in self.knot.mains.items():
+                subframe = subknot.frame(self.notebook)
+                subframe.pack(
+                    expand=True,
+                    fill='both',
+                )
                 self.notebook.add(subframe, text=name)
         def _add_notebook(self):
             ans = _ttk.Notebook(self)
             ans.pack(
                 side='top',
-                file='both',
+                fill='both',
+                expand=True,
                 padx=10,
                 pady=10,
             )
@@ -524,12 +709,12 @@ class _Uncallable(_Main):
             )
             return ans
         def _add_helpButton(self):
-            if self.description is None:
+            if self.knot.description is None:
                 return None
             ans = HelpButton(
                 self.buttonFrame,
                 title="help",
-                message=self.description,
+                message=self.knot.description,
             )
             ans.pack(
                 side='right',
