@@ -3,10 +3,9 @@ import tkinter.filedialog as _filedialog
 import tkinter.scrolledtext as _st
 import tkinter.ttk as _ttk
 
-import lib_dzne_filedata as _fd
-
 import lib_dzne_auto_interface.gui.inputs._parsing_nargs as _parsing
 import lib_dzne_auto_interface.gui.Stack as _Stack
+import lib_dzne_filedata as _fd
 
 
 def get(master, *, argument):

@@ -97,12 +97,13 @@ class _Argument(_Knot):
                 expand=True,
             )
             return ans
-    def __init__(self, *args, of_return=False, **kwargs):
-        self._of_return = bool(of_return)
-        self._subknots = list()
-        info = _Info.Information()
-        info.kwargs = dict(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        self._subknots = list() # an argument cannot have subknots
+        self._dictionary = dict(*args, **kwargs)
+        info = _Info.Information(kwargs=self._dictionary)
         info.args = info.pop('option_strings', [])
+        of_return = info.pop('of_return', False)
+        self._of_return = bool(of_return)
 
         # action
         info['action'] = info.get('action', 'store')
@@ -119,6 +120,14 @@ class _Argument(_Knot):
 
         self._parser = self._make_parser()
         self._action = info.exec(self._parser.add_argument)
+    def to_dict(self):
+        return dict(self._dictionary)
+    def configure(self, key, value):
+        dictionary = self.to_dict()
+        dictionary[key] = value
+        cls = type(self)
+        ans = cls(**dictionary)
+        return ans
     @property
     def positional(self):
         return not bool(len(self.option_strings))
