@@ -1,8 +1,13 @@
-
 import argparse as _ap
+import contextlib as _ctx
 import inspect as _ins
+import os as _os
+import tempfile as _tmp
 import tkinter as _tk
+import tkinter.messagebox as _msg
 import tkinter.ttk as _ttk
+
+import lib_dzne_filedata as _fd
 
 import lib_dzne_auto_interface.gui.HelpButton as _HB
 import lib_dzne_auto_interface.gui.inputs as _inputs
@@ -36,7 +41,12 @@ class _Knot(object):
             description=self._parser.description,
         )
     def parse(self, args, *, add_help=False):
-        return vars(self.parser(add_help=add_help).parse_args(args))
+        parser = self.parser(
+            add_help=add_help, 
+        )
+        namespace = parser.parse_args(args)
+        ans = vars(namespace)
+        return ans
     def frame(self, master):
         return type(self)._Frame(master=master, knot=self)
     @staticmethod
@@ -54,6 +64,11 @@ class _Knot(object):
 
 class _Argument(_Knot):
     class _Frame(_KnotFrame):
+        @property
+        def changed_argument(self):
+            ans = self.knot
+            ans = ans.change(help=None)
+            return ans
         def _init(self):
             self._labelFrame = self._add_labelFrame()
             self._helpButton = self._add_helpButton()
@@ -87,7 +102,7 @@ class _Argument(_Knot):
         def _add_argumentInput(self):
             ans = _inputs.ArgumentInput(
                 self._labelFrame, 
-                argument=self.knot,
+                argument=self.changed_argument,
             )
             ans.pack(
                 padx=10,
@@ -99,20 +114,41 @@ class _Argument(_Knot):
             return ans
     def __init__(self, *args, **kwargs):
         self._subknots = list() # an argument cannot have subknots
-        self._dictionary = dict(*args, **kwargs)
-        info = _Info.Information(kwargs=self._dictionary)
+        dictionary = dict(*args, **kwargs)
+        for key in dictionary.keys():
+            if key not in self.keys():
+                raise KeyError(key)
+        info = _Info.Information(kwargs=dictionary)
+
+        # option_strings
         info.args = info.pop('option_strings', [])
+
+        # of_return
         of_return = info.pop('of_return', False)
         self._of_return = bool(of_return)
+
+        # required
+        if bool(info.pop('required', False)):
+            info['required'] = True
+
+        # help
+        Help = type(info.get('help', None))
+        if Help not in (type(None), str):
+            raise TypeError(f"{Help.__name__} is not a valid type for the parameter 'help'. ")
+
+        # nargs
+        Nargs = type(info.get('nargs', None))
+        if Nargs not in (type(None), str, int):
+            raise TypeError(f"{Nargs.__name__} is not a valid type for the parameter 'nargs'. ")
 
         # action
         info['action'] = info.get('action', 'store')
         self._action_string = info['action']
         if self._action_string not in (
             'store', 
-            #'store_const',
             'store_true', 
             'store_false', 
+            #'store_const',
             #'append',
             #'append_const',
         ):
@@ -120,50 +156,79 @@ class _Argument(_Knot):
 
         self._parser = self._make_parser()
         self._action = info.exec(self._parser.add_argument)
+    def __getitem__(self, key):
+        if key not in self.keys():
+            raise KeyError(key)
+        if key == 'action':
+            return self._action_string
+        if key == 'of_return':
+            return self._of_return
+        if key == 'option_strings':
+            return tuple(self._action.option_strings)
+        return getattr(self._action, key)
+    @classmethod
+    def keys(cls):
+        return [
+            'option_strings',
+            'action',
+            'dest',
+            'nargs',
+            'const',
+            'default',
+            'type',
+            'choices',
+            'required',
+            'help',
+            'of_return',
+        ]
+    def items(self):
+        for key in self.keys():
+            yield key, self[key]
     def to_dict(self):
-        return dict(self._dictionary)
-    def configure(self, key, value):
+        return dict(self.items())
+    def change(self, **kwargs):
         dictionary = self.to_dict()
-        dictionary[key] = value
+        for key, value in kwargs.items():
+            dictionary[key] = value
         cls = type(self)
-        ans = cls(**dictionary)
+        ans = cls(dictionary)
         return ans
     @property
     def positional(self):
         return not bool(len(self.option_strings))
     @property
     def action(self):
-        return self._action_string
+        return self['action']
     @property
     def option_strings(self):
-        return tuple(self._action.option_strings)
+        return self['option_strings']
     @property
     def dest(self):
-        return self._action.dest
+        return self['dest']
     @property
     def nargs(self):
-        return self._action.nargs
+        return self['nargs']
     @property
     def const(self):
-        return self._action.const
+        return self['const']
     @property
     def default(self):
-        return self._action.default
+        return self['default']
     @property
     def type(self):
-        return self._action.type
+        return self['type']
     @property
     def choices(self):
-        return self._action.choices
+        return self['choices']
     @property
     def required(self):
-        return self._action.required
+        return self['required']
     @property
     def help(self):
-        return self._action.help
+        return self['help']
     @property
     def of_return(self):
-        return self._of_return
+        return self['of_return']
     @classmethod
     def argument_of_return(cls, annotation, *, details={}):
         if annotation is _ins.Parameter.empty:
@@ -257,6 +322,7 @@ class _Main(_Knot):
         self._run_dictionary(dictionary)
     def run_gui(self):
         root = _tk.Tk()
+        root.title("")
         frame = self.frame(root)
         frame.pack(fill='both', expand=True)
         root.mainloop()
@@ -284,8 +350,28 @@ class _Callable(_Main):
                 ans = dict(**ans, **kwargs)
             return ans
         def go(self):
-            kwargs = self.parse()
-            self.knot.run_dictionary(kwargs)
+            with _tmp.TemporaryDirectory() as directory:
+                filename = "a" + _fd.TXTData.ext()
+                errlog = _os.path.join(directory, filename)
+                with open(errlog, "w") as s, _ctx.redirect_stderr(s):
+                    self._go_except()
+                txtData = _fd.TXTData.load(errlog)
+            text = str(txtData)
+            text = text.strip('\n')
+            if len(text):
+                _msg.showwarning(
+                    title="Error Log",
+                    message=text,
+                )
+        def _go_except(self):
+            try:
+                kwargs = self.parse()
+                self.knot.run_dictionary(kwargs)
+            except BaseException as exc:
+                _msg.showerror(
+                    title=type(exc).__name__,
+                    message=str(exc),
+                )
         def _add_buttonFrame(self):
             ans = _tk.Frame(self)
             ans.pack(
@@ -427,7 +513,7 @@ class _Uncallable(_Main):
         self._description = value.__doc__
         self._mains = dict()
         parser = self._make_parser()
-        subparsers = parser.add_subparsers(dest=value._dest)
+        subparsers = parser.add_subparsers(dest=value._dest, required=True)
         for n, m in _ins.getmembers(value):
             if n.startswith("_"):
                 continue

@@ -3,9 +3,10 @@ import tkinter.filedialog as _filedialog
 import tkinter.scrolledtext as _st
 import tkinter.ttk as _ttk
 
+import lib_dzne_filedata as _fd
+
 import lib_dzne_auto_interface.gui.inputs._parsing_nargs as _parsing
 import lib_dzne_auto_interface.gui.Stack as _Stack
-import lib_dzne_filedata as _fd
 
 
 def get(master, *, argument):
@@ -154,22 +155,28 @@ class CheckableInput(_Input):
     @property
     def checked(self):
         return bool(self._intVar.get())
-    def _init(self, factory, required):
+    def _init(self, *, factory, required, default=True, option_strings=[]):
+        default = int(bool(default))
         self._intVar = _tk.IntVar()
-        self._intVar.set(1)
+        self._intVar.set(default)
         self._checkbutton = self._add_checkbutton(required)
         self._subinput = self._add_subinput(factory)
+        self._option_strings = list(option_strings)
     def _config_active(self, value):
         self._subinput.active = value
         if self._checkbutton is not None:
             state = 'normal' if value else 'disabled'
             self._checkbutton.config(state=state)
     def get_args(self):
-        if self.checked is False:
-            return list()
+        ans = list()
+        if not self.checked:
+            return ans
+        if len(self._option_strings):
+            ans.append(self._option_strings[0])
         if self._subinput is None:
-            return list()
-        return self._subinput.get_args()
+            return ans
+        ans += self._subinput.get_args()
+        return ans
     def _check_change(self):
         if self._subinput is not None:
             self._subinput.active = self.checked
@@ -206,16 +213,14 @@ class QuestionInput(CheckableInput):
     def _init(self, argument):
         if argument.nargs != '?':
             raise ValueError
-        self._argument = argument
-        super()._init(factory=self._factory, required=False)
+        self._factory_argument = argument.change(nargs=None)
+        super()._init(
+            factory=self._factory, 
+            required=False,
+            option_strings=argument.option_strings,
+        )
     def _factory(self, master):
-        return _get_dim_0(master, argument=self._argument)
-    def get_args(self):
-        ans = list()
-        if self.checked and len(self._argument.option_strings):
-            ans.append(self._argument.option_strings[0])
-        ans += super().get_args()
-        return ans
+        return get(master, argument=self._factory_argument)
 
 
 class NargsIntInput(_Input):
@@ -254,8 +259,12 @@ class NargsPluralInput(_Input):
 
 class ArgumentInput(CheckableInput):
     def _init(self, argument):
-        self._argument = argument
-        super()._init(factory=self._factory, required=argument.required)
+        self._factory_argument = argument.change(required=False)
+        super()._init(
+            factory=self._factory, 
+            required=argument.required,
+            option_strings=argument.option_strings,
+        )
     def _factory(self, master):
         return get(master, argument=self._argument)
 
