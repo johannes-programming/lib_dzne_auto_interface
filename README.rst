@@ -26,6 +26,12 @@ License
 
 This project is licensed under the MIT License.
 
+Links
+-----
+
+* `Download <https://pypi.org/project/lib-dzne-auto-interface/#files>`_
+* `Source <https://github.com/johannes-programming/lib_dzne_auto_interface>`_ 
+
 Credits
 -------
 - Author: Johannes
